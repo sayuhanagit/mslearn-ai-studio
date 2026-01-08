@@ -33,17 +33,16 @@ RUN npm run build
 ############################
 # Runtime stage
 ############################
+# Runtime stage
 FROM node:18-bookworm-slim AS runtime
-
 WORKDIR /app
 ENV NODE_ENV=production
 
-# まず package*.json をコピーして本番依存だけ入れる
 COPY --from=build /src/app/package.json /src/app/package-lock.json* /app/
-RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
 
-# アプリ本体とビルド成果物をコピー
-COPY --from=build /src/app /app
-
-EXPOSE 3000
-CMD ["npm", "run", "start"]
+# ★ ここがポイント：--ignore-scripts を付ける
+RUN if [ -f package-lock.json ]; then \
+      npm ci --omit=dev --ignore-scripts; \
+    else \
+      npm install --omit=dev --ignore-scripts; \
+    fi
