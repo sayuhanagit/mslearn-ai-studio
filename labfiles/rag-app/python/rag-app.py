@@ -1,87 +1,77 @@
 import os
-from dotenv import load_dotenv
+from flask import Flask, render_template, request, jsonify, session
 from openai import AzureOpenAI
 
-def main():
-    # Clear the console
-    os.system('cls' if os.name == 'nt' else 'clear')
+app = Flask(__name__)
+# App Service では必ず SECRET_KEY を設定するのが望ましい
+app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-secret-change-me")
 
-    try:
-        # Get configuration settings
-        load_dotenv()
-        open_ai_endpoint = os.getenv("OPEN_AI_ENDPOINT")
-        open_ai_key = os.getenv("OPEN_AI_KEY")
-        chat_model = os.getenv("CHAT_MODEL")
-        embedding_model = os.getenv("EMBEDDING_MODEL")
-        search_url = os.getenv("SEARCH_ENDPOINT")
-        search_key = os.getenv("SEARCH_KEY")
-        index_name = os.getenv("INDEX_NAME")
+def get_env(name: str) -> str:
+    v = os.getenv(name)
+    if not v:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return v
 
+def build_client() -> AzureOpenAI:
+    return AzureOpenAI(
+        api_version="2024-12-01-preview",
+        azure_endpoint=get_env("OPEN_AI_ENDPOINT"),
+        api_key=get_env("OPEN_AI_KEY"),
+    )
 
-        # Get an Azure OpenAI chat client
-        chat_client = AzureOpenAI(
-            api_version = "2024-12-01-preview",
-            azure_endpoint = open_ai_endpoint,
-            api_key = open_ai_key
-        )
-
-
-        # Initialize prompt with system message
-        prompt = [
-            {"role": "system", "content": "You are a travel assistant that provides information on travel services available from Margie's Travel."}
-        ]
-
-        # Loop until the user types 'quit'
-        while True:
-            # Get input text
-            input_text = input("Enter the prompt (or type 'quit' to exit): ")
-            if input_text.lower() == "quit":
-                break
-            if len(input_text) == 0:
-                print("Please enter a prompt.")
-                continue
-
-            # Add the user input message to the prompt
-            prompt.append({"role": "user", "content": input_text})
-
-            # Additional parameters to apply RAG pattern using the AI Search index
-            rag_params = {
-                "data_sources": [
-                    {
-                        # he following params are used to search the index
-                        "type": "azure_search",
-                        "parameters": {
-                            "endpoint": search_url,
-                            "index_name": index_name,
-                            "authentication": {
-                                "type": "api_key",
-                                "key": search_key,
-                            },
-                            # The following params are used to vectorize the query
-                            "query_type": "vector",
-                            "embedding_dependency": {
-                                "type": "deployment_name",
-                                "deployment_name": embedding_model,
-                            },
-                        }
-                    }
-                ],
+def rag_params():
+    return {
+        "data_sources": [
+            {
+                "type": "azure_search",
+                "parameters": {
+                    "endpoint": get_env("SEARCH_ENDPOINT"),
+                    "index_name": get_env("INDEX_NAME"),
+                    "authentication": {"type": "api_key", "key": get_env("SEARCH_KEY")},
+                    "query_type": "vector",
+                    "embedding_dependency": {
+                        "type": "deployment_name",
+                        "deployment_name": get_env("EMBEDDING_MODEL"),
+                    },
+                },
             }
+        ]
+    }
 
-            # Submit the prompt with the data source options and display the response
-            response = chat_client.chat.completions.create(
-                model=chat_model,
-                messages=prompt,
-                extra_body=rag_params
-            )
-            completion = response.choices[0].message.content
-            print(completion)
+SYSTEM_MESSAGE = "You are a travel assistant that provides information on travel services available from Margie's Travel."
 
-            # Add the response to the chat history
-            prompt.append({"role": "assistant", "content": completion})
+@app.get("/")
+def index():
+    # セッションにチャット履歴が無ければ初期化
+    if "messages" not in session:
+        session["messages"] = [{"role": "system", "content": SYSTEM_MESSAGE}]
+    return render_template("index.html")
 
-    except Exception as ex:
-        print(ex)
+@app.post("/api/chat")
+def chat():
+    user_text = (request.json or {}).get("message", "").strip()
+    if not user_text:
+        return jsonify({"error": "message is required"}), 400
 
-if __name__ == '__main__':
-    main()
+    messages = session.get("messages") or [{"role": "system", "content": SYSTEM_MESSAGE}]
+    messages.append({"role": "user", "content": user_text})
+
+    client = build_client()
+    resp = client.chat.completions.create(
+        model=get_env("CHAT_MODEL"),
+        messages=messages,
+        extra_body=rag_params(),
+    )
+
+    assistant_text = resp.choices[0].message.content or ""
+    messages.append({"role": "assistant", "content": assistant_text})
+
+    # セッションに保存
+    session["messages"] = messages
+
+    return jsonify({"reply": assistant_text})
+
+@app.post("/api/reset")
+def reset():
+    session["messages"] = [{"role": "system", "content": SYSTEM_MESSAGE}]
+    return jsonify({"ok": True})
