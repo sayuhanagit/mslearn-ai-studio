@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RAG Chat (Azure OpenAI + AI Search)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 24px; }
+    #log { border: 1px solid #ddd; padding: 12px; height: 60vh; overflow:auto; white-space: pre-wrap; }
+    form { display:flex; gap:8px; margin-top:12px; }
+    input { flex:1; padding:10px; }
+    button { padding:10px 14px; }
+    .row { margin: 8px 0; }
+    .me { font-weight: 600; }
+  </style>
+</head>
+<body>
+  <h1>RAG Chat</h1>
+  <div id="log"></div>
+
+  <form id="f">
+    <input id="t" placeholder="質問を入力…" autocomplete="off" />
+    <button type="submit">送信</button>
+    <button type="button" id="reset">リセット</button>
+  </form>
+
+  <script>
+    const log = document.getElementById('log');
+    const f = document.getElementById('f');
+    const t = document.getElementById('t');
+    const resetBtn = document.getElementById('reset');
+
+    function add(role, text){
+      const div = document.createElement('div');
+      div.className = 'row';
+      div.innerHTML = `<span class="${role==='you'?'me':''}">${role}:</span> ${text}`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    f.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const msg = t.value.trim();
+      if(!msg) return;
+      add('you', msg);
+      t.value = '';
+      add('bot', '...');
+
+      const rows = log.querySelectorAll('.row');
+      const last = rows[rows.length-1];
+
+      const res = await fetch('/api/chat', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({message: msg})
+      });
+      const data = await res.json();
+      last.innerHTML = `<span>bot:</span> ${data.reply || data.error || 'error'}`;
+      log.scrollTop = log.scrollHeight;
+    });
+
+    resetBtn.addEventListener('click', async () => {
+      await fetch('/api/reset', { method:'POST' });
+      log.innerHTML = '';
+    });
+  </script>
+</body>
+</html>
