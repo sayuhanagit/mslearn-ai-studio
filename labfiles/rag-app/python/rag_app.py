@@ -27,7 +27,7 @@ def rag_params():
                 "parameters": {
                     "endpoint": get_env("SEARCH_ENDPOINT"),
                     "index_name": get_env("INDEX_NAME"),
-                    "authentication": {"type": "api_key", "key": get_env("SEARCH_KEY")},
+                    "authentication": {"type": "system_assigned_managed_identity"},
                     "query_type": "vector",
                     "embedding_dependency": {
                         "type": "deployment_name",
